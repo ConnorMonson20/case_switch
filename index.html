@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Case/Switch Visualizer</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --grid: rgba(0,0,0,.06);
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --primary: #2563eb;
+      --accent: #10b981;
+      --shadow: 0 10px 25px rgba(0,0,0,.08);
+      --radius: 14px;
+      --selected: #fef3c7;
+      --delete: #ef4444;
+      --tabs-h: 44px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color: var(--text); }
+
+    /* ===== Tabs Bar ===== */
+    #tabs {
+      position: fixed; top: 0; left: 0; right: 0; height: var(--tabs-h);
+      display: flex; gap: 8px; align-items: center; padding: 6px 10px;
+      background: var(--bg); border-bottom: 1px solid #e5e7eb; z-index: 200;
+    }
+    #tabs button {
+      border: none; background: none; padding: 8px 14px; border-radius: 10px;
+      cursor: pointer; font-weight: 700; color: #374151;
+    }
+    #tabs button.active { background: var(--primary); color: #fff; }
+
+    .toolbar { position: fixed; inset: 12px auto auto 12px; z-index: 100; background: var(--card); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; display: flex; gap: 8px; align-items: center; border: 1px solid #e5e7eb; top: calc(12px + var(--tabs-h)); }
+    .zoombar { position: fixed; inset: 12px 12px auto auto; z-index: 100; background: var(--card); border-radius: 12px; box-shadow: var(--shadow); padding: 8px; display: flex; gap: 6px; align-items: center; border: 1px solid #e5e7eb; top: calc(12px + var(--tabs-h)); }
+    .btn { appearance: none; border: 1px solid #e5e7eb; background: #fff; color: var(--text); padding: 8px 12px; border-radius: 10px; cursor: pointer; font-weight: 600; letter-spacing: .2px; transition: .15s transform ease, .15s background ease; }
+    .btn:hover { background: #f3f4f6; }
+    .btn.primary { background: var(--primary); color: white; border-color: var(--primary); }
+    .btn.primary:hover { filter: brightness(.95); }
+    .mini { font-size: 12px; padding: 6px 8px; }
+
+    #canvas { position: fixed; inset: 0; background: var(--bg); overflow: hidden; }
+    #stageWrap { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; transform-origin: 0 0; }
+
+    #grid { position: absolute; inset: 0; z-index: 0; pointer-events: none;
+      background-image: linear-gradient(90deg, var(--grid) 1px, transparent 1px), linear-gradient(0deg, var(--grid) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    #wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+
+    .node {
+      position: absolute;
+      min-width: 180px;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid #e6e8ef;
+      user-select: none;
+      transform: translate(0,0);
+      cursor: grab;
+      transition: background 0.1s ease, transform .06s ease;
+      z-index: 2;
+    }
+    .node.selected { background: var(--selected); border-color: #facc15; }
+    .node:active { cursor: grabbing; }
+
+    .node .header {
+      padding: 10px 12px;
+      border-bottom: 1px solid #eef0f5;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #111827;
+      color: #ffffff;
+      border-top-left-radius: var(--radius);
+      border-top-right-radius: var(--radius);
+      font-size: 14px;
+    }
+    .node.answer .header { background: #0f766e; }
+
+    .node .body {
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    label { font-size: 12px; color: var(--muted); }
+    input[type="text"], textarea {
+      width: 100%;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 14px;
+      background: #fff;
+    }
+    textarea { min-height: 70px; resize: vertical; }
+
+    .case-rows { display: grid; gap: 8px; }
+    .row { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; padding-right: 18px; }
+    .row .rport { position: absolute; right: -6px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; font-size:12px; border-radius:999px; background:#eef2ff; color:#3730a3; }
+    .node .footer { display:flex; gap:8px; }
+    .node.case { min-width: 380px; }
+    .port { width: 12px; height: 12px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+
+    .inport, .oport{
+      position:absolute; top:50%; transform:translateY(-50%);
+      width:12px; height:12px; border-radius:50%;
+      background:var(--primary);
+      box-shadow:0 0 0 3px rgba(37,99,235,.15);
+    }
+    .inport{ left:-6px; }
+    .oport{ right:-6px; }
+
+    .trash { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: #fee2e2; color: var(--delete); font-weight: bold; font-size: 14px; cursor: pointer; transition: transform 0.1s ease, background 0.2s ease; z-index: 3; }
+    .trash:hover { background: #fecaca; transform: scale(1.1); }
+
+    .poof { position: absolute; font-size: 20px; pointer-events: none; animation: poof 0.6s ease-out forwards; z-index: 4; }
+    @keyframes poof { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(2) translateY(-10px); } }
+    .particle { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #fde68a; opacity: .9; pointer-events: none; animation: drift .6s ease-out forwards; }
+    @keyframes drift { 0% { transform: translate(0,0) scale(1); opacity: .9; } 100% { transform: translate(var(--dx), var(--dy)) scale(0.3); opacity: 0; } }
+    .vanish { animation: shrinkfade .22s ease-in forwards; }
+    @keyframes shrinkfade { 0% { opacity: 1; transform: translate(var(--x), var(--y)) scale(1); } 100% { opacity: 0; transform: translate(var(--x), var(--y)) scale(.7); } }
+
+    .hint { position: fixed; bottom: 12px; left: 12px; color: #4b5563; font-size: 13px; background: rgba(255,255,255,.8); padding:8px 10px; border-radius: 8px; border:1px solid #e5e7eb; box-shadow: var(--shadow) }
+
+    /* ===== Case Schedule UI ===== */
+    .case-schedule {
+      border-top: 1px dashed #e5e7eb;
+      padding-top: 6px;
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .case-schedule-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .case-schedule-row input[type="date"] {
+      flex: 1;
+      font-size: 11px;
+      padding: 4px 6px;
+    }
+    .case-schedule-days {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .case-schedule-days label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      background: #f3f4f6;
+      border-radius: 999px;
+      padding: 2px 6px;
+    }
+    .case-schedule-days input[type="checkbox"] {
+      width: 11px;
+      height: 11px;
+    }
+    .case-schedule-indef {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .case-schedule-indef input[type="checkbox"] {
+      width: 12px;
+      height: 12px;
+    }
+
+    /* ===== Inspector ===== */
+    #inspectorWrap { position: fixed; top: 0; right: 0; height: 100%; width: 380px; z-index: 120; pointer-events: none; }
+    #inspector { position: absolute; inset: 0 0 0 auto; width: 380px; background: #3a3a3a; color: #f8fafc; border-left: 1px solid #232323; box-shadow: -12px 0 30px rgba(0,0,0,.18); transform: translateX(100%); transition: transform .18s ease; pointer-events: auto; display: flex; flex-direction: column; }
+    #inspector.open { transform: translateX(0); }
+    .insp-header { padding: 14px 14px 10px; font-weight: 700; font-size: 16px; background: #2f2f2f; border-bottom: 1px solid #242424; display:flex; align-items:center; gap:8px; }
+    .insp-body { padding: 14px; overflow: auto; display: grid; gap: 12px; }
+    .insp-card { background: #2f2f2f; border: 1px solid #242424; border-radius: 10px; padding: 10px; }
+    .insp-label { font-size: 12px; color: #cbd5e1; margin-bottom: 6px; display:block; }
+    .insp-text { width: 100%; min-height: 140px; background:#111; color:#e5e7eb; border:1px solid #444; border-radius: 8px; padding:10px; font: inherit; }
+    .insp-input { width: 100%; background:#111; color:#e5e7eb; border:1px solid #444; border-radius: 8px; padding:8px 10px; font: inherit; }
+    .insp-row { display:flex; gap:8px; align-items:center; }
+    .insp-actions { padding: 12px 14px; border-top: 1px solid #242424; background:#2f2f2f; display:grid; gap:8px; }
+    .button-white { background: #e5e7eb; border: 0; border-radius: 10px; padding: 10px 12px; font-weight: 700; cursor:pointer; color:#111827; }
+    .button-danger { background: #fecaca; color:#7f1d1d; border:0; border-radius:10px; padding:10px 12px; font-weight:700; cursor:pointer; }
+
+    .qr-handle { width:24px; text-align:center; opacity:.9; }
+    .qr-controls { display:flex; gap:4px; }
+    .qr-del { background:#4b5563; border:0; border-radius:6px; padding:4px 6px; color:#fff; cursor:pointer; }
+    .qr-order { background:#6b7280; border:0; border-radius:6px; padding:4px 6px; color:#fff; cursor:pointer; }
+
+    /* ===== Preview panel ===== */
+    .preview-toggle{
+      position:fixed; right:12px; bottom:12px; z-index:140;
+      background:#111827; color:#fff; border-radius:999px; padding:10px 14px;
+      font-weight:700; cursor:pointer; box-shadow:var(--shadow);
+      border:1px solid #0b1220;
+    }
+    .preview-panel{
+      position:fixed; right:12px; bottom:60px; width:340px; max-height:70vh; z-index:140;
+      background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:var(--shadow);
+      display:none; overflow:hidden; flex-direction:column;
+    }
+    .preview-panel.open{ display:flex; }
+
+    .preview-head{
+      background:#111827; color:#fff; padding:10px 12px; display:flex; align-items:center; gap:8px; font-weight:700;
+    }
+    .preview-body{
+      padding:10px 12px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      overflow:hidden;
+    }
+    .preview-buttons{
+      order:2;
+      display:flex;
+      gap:8px;
+      justify-content:flex-end;
+      margin-top:8px;
+      flex-wrap:wrap;
+    }
+    .preview-buttons .pbtn{
+      background:#eef2ff; border:1px solid #dbe3ff; color:#1e2a78; border-radius:999px; padding:6px 10px; cursor:pointer; font-weight:700; font-size:13px;
+    }
+    .preview-msgs{
+      order:1;
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      overflow-y:auto;
+    }
+
+    .bubble{ border:1px solid #e5e7eb; background:#fafafa; padding:8px 10px; border-radius:12px; font-size:14px; max-width:85%; align-self:flex-start; }
+    .bubble.user{ background:#e0f2fe; border-color:#bae6fd; align-self:flex-end; text-align:right; }
+    .bubble.bot{ background:#ecfdf5; border-color:#bbf7d0; }
+
+    /* Chatbot bubble / iframe */
+    .chatbot-bubble{
+      padding: 0;
+      background: transparent;
+      border: none;
+      max-width: 100%;
+      align-self: stretch;
+    }
+    .chatbot-frame{
+      width: 100%;
+      min-height: 260px;
+      border: 0;
+      border-radius: 12px;
+      display: block;
+    }
+
+    .preview-select{ flex:1; }
+
+    /* ===== Tab containers ===== */
+    #tab-flow { display: block; }
+    #tab-users { display: none; height: calc(100vh - var(--tabs-h)); }
+    #tab-users iframe { width: 100%; height: 100%; border: 0; }
+  </style>
+</head>
+<body>
+
+  <!-- Tabs -->
+  <nav id="tabs">
+    <button data-tab="flow" class="active">Flow Editor</button>
+    <button data-tab="users">Users</button>
+  </nav>
+
+  <!-- FLOW TAB -->
+  <div id="tab-flow">
+    <div class="toolbar">
+      <button id="exportBtn" class="btn">Export</button>
+      <button id="importBtn" class="btn">Import</button>
+      <button id="addCase" class="btn primary">＋ Add Case</button>
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+        <input type="checkbox" id="focusDebug" />
+        Focus Debug
+      </label>
+    </div>
+
+    <div class="zoombar">
+      <span style="color:#6b7280; font-size:12px;">Zoom</span>
+      <button id="zoomOut" class="btn" title="Zoom Out">🔍−</button>
+      <button id="zoomIn" class="btn" title="Zoom In">🔍＋</button>
+      <button id="zoomReset" class="btn" title="Reset View">Reset</button>
+    </div>
+
+    <div id="canvas">
+      <div id="stageWrap">
+        <div id="grid"></div>
+        <svg id="wires"></svg>
+        <div id="zoomPivot" style="position:absolute;width:10px;height:10px;border-radius:50%;background:red;opacity:0;pointer-events:none;z-index:99;transform:translate(-50%,-50%);"></div>
+      </div>
+    </div>
+
+    <!-- Inspector -->
+    <div id="inspectorWrap" aria-hidden="true">
+      <aside id="inspector" role="complementary" aria-label="Node Inspector">
+        <div class="insp-header">Chat Box: Multiple Choice</div>
+        <div class="insp-body">
+          <div class="insp-card">
+            <label class="insp-label">Message</label>
+            <textarea id="inspPrompt" class="insp-text" placeholder="Hi there…"></textarea>
+          </div>
+
+          <div class="insp-card" id="inspQuickRepliesCard">
+            <div class="insp-row" style="justify-content:space-between;">
+              <span class="insp-label" style="margin:0">Quick replies</span>
+              <button id="inspAddReply" class="button-white" style="padding:6px 10px; font-size:12px;">＋ Add Quick Reply</button>
+            </div>
+            <div id="inspReplies"></div>
+            <div class="insp-checkbox">
+              <input id="inspMulti" type="checkbox" />
+              <label for="inspMulti">Enable multi-select quick replies</label>
+            </div>
+          </div>
+
+          <details class="insp-card">
+            <summary style="cursor:pointer">Show advanced</summary>
+            <div style="margin-top:10px; display:grid; gap:8px;">
+              <label class="insp-label">Test value (for Run)</label>
+              <input id="inspTest" class="insp-input" placeholder="Type a value and Run…" />
+            </div>
+          </details>
+        </div>
+        <div class="insp-actions">
+          <button id="inspSave" class="button-white">Save</button>
+          <div class="insp-row" style="gap:8px;">
+            <button id="inspMakeRoot" class="btn mini" title="Make this node the logical root">Make root</button>
+            <button id="inspDuplicate" class="btn mini">Duplicate</button>
+            <button id="inspDelete" class="button-danger">Delete Node</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Preview toggle + panel -->
+    <div id="previewToggle" class="preview-toggle">Preview</div>
+    <div id="previewPanel" class="preview-panel">
+      <div class="preview-head">
+        Preview
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <button id="previewReset" class="btn mini">Reset</button>
+          <button id="previewClose" class="btn mini">✕</button>
+        </div>
+      </div>
+      <div class="preview-body">
+        <div id="previewButtons" class="preview-buttons"></div>
+        <div id="previewMsgs" class="preview-msgs"></div>
+      </div>
+    </div>
+
+    <div class="hint">Use the mouse wheel to zoom (scroll down = zoom out, scroll up = zoom in). Drag the empty background to pan.</div>
+  </div>
+
+  <!-- USERS TAB -->
+  <div id="tab-users">
+    <iframe src="users.html" title="Users"></iframe>
+  </div>
+
+  <!-- Tab switcher -->
+  <script>
+  (function(){
+    const LS_KEY = 'csv_active_tab';
+    const tabs = document.querySelectorAll('#tabs button');
+    const flow = document.getElementById('tab-flow');
+    const users = document.getElementById('tab-users');
+
+    function show(tab){
+      tabs.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      flow.style.display  = (tab === 'flow')  ? 'block' : 'none';
+      users.style.display = (tab === 'users') ? 'block' : 'none';
+      localStorage.setItem(LS_KEY, tab);
+    }
+
+    tabs.forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+    show(localStorage.getItem(LS_KEY) || 'flow');
+  })();
+  </script>
+
+  <!-- Scripts -->
+  <script src="js/util.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/preview.js"></script>
+  <script src="js/flowio.js"></script>
+  <script src="js/autosave.js"></script>
+</body>
+</html>

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Users — Local CSV + Groups</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto;background:#f6f7fb;color:#111;margin:0}
+  .wrap{max-width:1100px;margin:28px auto;padding:0 16px}
+  .card{background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.06);padding:18px}
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  input[type="file"]{display:none}
+  .btn{border:1px solid #e5e7eb;background:#fff;border-radius:10px;padding:10px 12px;cursor:pointer;font-size:13px}
+  .btn.primary{background:#2563eb;color:#fff;border:none}
+  .input{border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:12px 10px;border-top:1px solid #eef0f5;text-align:left;vertical-align:top}
+  th{font-size:12px;color:#4b5563;text-transform:uppercase;letter-spacing:.02em}
+  .pill{display:inline-flex;gap:6px;align-items:center;font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid #e5e7eb;margin:2px 6px 0 0;background:#f3f4f6}
+  .pill button{all:unset;cursor:pointer;font-weight:700;opacity:.6}
+  .muted{color:#6b7280}
+  .phone{color:#2563eb}
+  .right{margin-left:auto}
+  .note{font-size:12px;color:#6b7280}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:24px;z-index:50}
+  .modal.show{display:flex}
+  .panel{width:min(760px,95vw);max-height:85vh;overflow:auto;background:#fff;border-radius:14px;box-shadow:0 30px 60px rgba(0,0,0,.25)}
+  .panel .hd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #eef0f5}
+  .panel .bd{padding:16px}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .row{display:flex;flex-direction:column;gap:6px}
+  .group-editor{display:flex;flex-wrap:wrap;gap:8px;border:1px solid #e5e7eb;border-radius:10px;padding:8px}
+  .group-editor input{border:none;outline:none;min-width:120px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="toolbar">
+      <input id="q" class="input" placeholder="Search users…" />
+      <select id="active" class="input">
+        <option value="all">All</option>
+        <option value="true">Active only</option>
+        <option value="false">Inactive only</option>
+      </select>
+      <input id="groupFilter" class="input" placeholder="Filter by group (e.g. Group5)" />
+      <span class="right"></span>
+      <label class="btn" for="csv">Upload CSV</label>
+      <input id="csv" type="file" accept=".csv">
+      <button id="btnExport" class="btn">Export CSV</button>
+      <button id="btnSaveAll" class="btn primary">Save CSVs</button>
+      <button id="btnChangeTargets" class="btn">Change Save Location</button>
+      <button id="btnAdd" class="btn primary">Add User</button>
+    </div>
+
+    <div id="fsNote" class="note" style="display:none; margin: -4px 0 8px;">
+      Your browser doesn’t allow true overwrite saves; downloads will create new files (e.g., “(1)”). Use Chrome/Edge desktop for in-place overwrite.
+    </div>
+
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>User Id</th><th>First</th><th>Last</th><th>Phone</th><th>Email</th><th>Groups</th><th>Flags</th><th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal" id="modal">
+  <div class="panel">
+    <div class="hd">
+      <strong id="modalTitle">Add User</strong>
+      <button id="closeModal" class="btn">✕</button>
+    </div>
+    <div class="bd">
+      <div class="grid">
+        <div class="row"><label>User ID</label><input id="f_id" class="input"></div>
+        <div class="row"><label>Active</label>
+          <select id="f_active" class="input"><option value="true">true</option><option value="false">false</option></select>
+        </div>
+        <div class="row"><label>First Name</label><input id="f_first" class="input"></div>
+        <div class="row"><label>Last Name</label><input id="f_last" class="input"></div>
+        <div class="row"><label>Phone</label><input id="f_phone" class="input" placeholder="+15551234567"></div>
+        <div class="row"><label>Email</label><input id="f_email" class="input" placeholder="name@example.com"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label>Groups</label>
+        <div id="groupsBox" class="group-editor">
+          <input id="groupInput" placeholder="type group and press Enter">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label>Flags (optional, pipe-separated)</label>
+        <input id="f_flags" class="input" placeholder="SUBSCRIBED|#Oct_schedule_trigger">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button id="btnDelete" class="btn" style="display:none">Delete</button>
+        <button id="btnSave" class="btn primary">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- Storage ---------- */
+const LS_KEY = 'users_table_v1';
+let USERS = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+function persist(){ localStorage.setItem(LS_KEY, JSON.stringify(USERS)); }
+
+/* ---------- File System Access API (true save) ---------- */
+const supportsFS = 'showSaveFilePicker' in window;
+document.getElementById('fsNote').style.display = supportsFS ? 'none' : '';
+
+let usersHandle = null;
+let groupsHandle = null;
+
+async function pickTargets(){
+  if (!supportsFS) return false;
+  usersHandle = await window.showSaveFilePicker({
+    suggestedName: 'users.csv',
+    types: [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }]
+  });
+  groupsHandle = await window.showSaveFilePicker({
+    suggestedName: 'user_groups.csv',
+    types: [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }]
+  });
+  return true;
+}
+
+async function writeFile(handle, contents){
+  const w = await handle.createWritable();
+  await w.write(contents);
+  await w.close();
+}
+
+/* ---------- CSV helpers ---------- */
+function toCSV(list){
+  const esc = s => `"${String(s??'').replace(/"/g,'""')}"`;
+  const header = ['user_id','first_name','last_name','phone','email','groups','flags','active'];
+  const lines = [header.join(',')];
+  for (const u of list){
+    lines.push([
+      u.user_id||'',
+      u.first_name||'',
+      u.last_name||'',
+      u.phone||'',
+      (u.email||'').toLowerCase(),
+      (u.groups||[]).join('|'),
+      (u.flags||[]).join('|'),
+      u.active===false?'false':'true'
+    ].map(esc).join(','));
+  }
+  return lines.join('\n');
+}
+
+function toUserGroupsCSV(list){
+  const esc = s => `"${String(s??'').replace(/"/g,'""')}"`;
+  const rows = [];
+  rows.push(['user_id','phone','email','group'].join(','));
+  for (const u of list){
+    const groups = (u.groups || []);
+    if (!groups.length) continue;
+    for (const g of groups){
+      rows.push([u.user_id||'', u.phone||'', (u.email||'').toLowerCase(), g].map(esc).join(','));
+    }
+  }
+  return rows.join('\n');
+}
+
+/* ---------- Fallback download ---------- */
+function download(name, text){
+  const blob = new Blob([text], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ---------- Parse CSV ---------- */
+function parseCSV(text){
+  const lines = text.split(/\r?\n/).filter(l=>l.trim().length);
+  const [head, ...rest] = lines;
+  const keys = head.split(',').map(x=>x.trim());
+  return rest.map(l=>{
+    const vals = l.split(',').map(x=>x.replace(/^"|"$/g,'').replace(/""/g,'"').trim());
+    const obj = Object.fromEntries(keys.map((k,i)=>[k, vals[i]||'']));
+    obj.groups = (obj.groups||'').split('|').map(s=>s.trim()).filter(Boolean);
+    obj.flags  = (obj.flags ||'').split('|').map(s=>s.trim()).filter(Boolean);
+    obj.active = String(obj.active||'true').toLowerCase()!=='false';
+    return obj;
+  });
+}
+
+/* ---------- Render ---------- */
+function render(){
+  const q = document.getElementById('q').value.toLowerCase();
+  const active = document.getElementById('active').value;
+  const gf = document.getElementById('groupFilter').value.trim().toLowerCase();
+  const tbody = document.querySelector('#tbl tbody');
+  tbody.innerHTML='';
+
+  USERS
+    .filter(u => active==='all' ? true : (String(u.active)===active))
+    .filter(u => !gf || (u.groups||[]).some(g => g.toLowerCase().includes(gf)))
+    .filter(u => {
+      if (!q) return true;
+      return [u.user_id,u.first_name,u.last_name,u.phone,u.email,(u.groups||[]).join(' '),(u.flags||[]).join(' ')]
+        .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+    })
+    .forEach(u=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`
+        <td>${u.user_id||'<span class="muted">none</span>'}</td>
+        <td>${u.first_name||'<span class="muted">none</span>'}</td>
+        <td>${u.last_name||'<span class="muted">none</span>'}</td>
+        <td class="phone">${u.phone||'<span class="muted">none</span>'}</td>
+        <td>${u.email||'<span class="muted">none</span>'}</td>
+        <td>${(u.groups||[]).map(g=>`<span class="pill">${g}</span>`).join('')}</td>
+        <td>${(u.flags||[]).map(f=>`<span class="pill">${f}</span>`).join('')}</td>
+        <td>
+          <button class="btn" data-act="edit">Edit</button>
+          <button class="btn" data-act="delete">Remove</button>
+        </td>
+      `;
+      const editBtn = tr.querySelector('[data-act="edit"]');
+      const delBtn  = tr.querySelector('[data-act="delete"]');
+
+      editBtn.addEventListener('click',()=> openModal(u));
+      delBtn.addEventListener('click',()=>{
+        if (!confirm('Remove this user?')) return;
+        const idx = USERS.indexOf(u);
+        if (idx >= 0){
+          USERS.splice(idx,1);
+          persist();
+          render();
+        }
+      });
+
+      tbody.appendChild(tr);
+    });
+}
+
+/* ---------- Modal (Add/Edit) ---------- */
+const modal = document.getElementById('modal');
+const groupInput = document.getElementById('groupInput');
+const groupsBox = document.getElementById('groupsBox');
+const f_id = document.getElementById('f_id');
+const f_active = document.getElementById('f_active');
+const f_first = document.getElementById('f_first');
+const f_last = document.getElementById('f_last');
+const f_phone = document.getElementById('f_phone');
+const f_email = document.getElementById('f_email');
+const f_flags = document.getElementById('f_flags');
+let editing = null;
+
+function pill(label, onX){
+  const el = document.createElement('span'); el.className='pill'; el.innerHTML = `${label} <button title="remove">×</button>`;
+  el.querySelector('button').onclick = () => onX && onX();
+  return el;
+}
+
+function refreshGroupPills(u){
+  [...groupsBox.querySelectorAll('.pill')].forEach(n=>n.remove());
+  (u.groups||[]).forEach((g,idx)=>{
+    groupsBox.insertBefore(pill(g, ()=>{ u.groups.splice(idx,1); refreshGroupPills(u); }), groupInput);
+  });
+}
+
+function openModal(u){
+  editing = u ? u : { user_id:'', first_name:'', last_name:'', phone:'', email:'', groups:[], flags:[], active:true };
+  document.getElementById('modalTitle').textContent = u ? 'Edit User' : 'Add User';
+  document.getElementById('btnDelete').style.display = u ? '' : 'none';
+
+  f_id.value = editing.user_id||'';
+  f_active.value = editing.active===false?'false':'true';
+  f_first.value = editing.first_name||'';
+  f_last.value  = editing.last_name||'';
+  f_phone.value = editing.phone||'';
+  f_email.value = editing.email||'';
+  f_flags.value = (editing.flags||[]).join('|');
+
+  refreshGroupPills(editing);
+  groupInput.value='';
+  modal.classList.add('show');
+  groupInput.focus();
+}
+
+function closeModal(){ modal.classList.remove('show'); editing=null; }
+document.getElementById('closeModal').onclick = closeModal;
+document.getElementById('btnAdd').onclick = ()=> openModal(null);
+
+groupInput.addEventListener('keydown', (e)=>{
+  if (e.key==='Enter'){
+    const v = groupInput.value.trim();
+    if (v){
+      if (!editing.groups) editing.groups=[];
+      if (!editing.groups.includes(v)) editing.groups.push(v);
+      groupInput.value='';
+      refreshGroupPills(editing);
+    }
+    e.preventDefault();
+  }
+});
+
+document.getElementById('btnSave').onclick = ()=>{
+  const normPhone = s => (s||'').replace(/[^\d+]/g,'');
+  const normEmail = s => (s||'').trim().toLowerCase();
+
+  Object.assign(editing, {
+    user_id: f_id.value.trim(),
+    active:  f_active.value==='true',
+    first_name: f_first.value.trim(),
+    last_name:  f_last.value.trim(),
+    phone: normPhone(f_phone.value),
+    email: normEmail(f_email.value),
+    flags: (f_flags.value||'').split('|').map(s=>s.trim()).filter(Boolean)
+  });
+
+  if (!USERS.includes(editing)) USERS.push(editing);
+  persist(); render(); closeModal();
+};
+
+document.getElementById('btnDelete').onclick = ()=>{
+  const idx = USERS.indexOf(editing);
+  if (idx>=0) USERS.splice(idx,1);
+  persist(); render(); closeModal();
+};
+
+/* ---------- CSV import/export/save ---------- */
+document.getElementById('csv').addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if (!file) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    const incoming = parseCSV(ev.target.result);
+    const keyOf = u => u.user_id || u.phone;
+    const map = new Map(USERS.map(u=>[keyOf(u), u]));
+    incoming.forEach(u=>{
+      const k = keyOf(u); const prev = map.get(k);
+      if (prev){
+        prev.first_name = u.first_name || prev.first_name;
+        prev.last_name  = u.last_name  || prev.last_name;
+        prev.phone      = u.phone      || prev.phone;
+        prev.email      = u.email      || prev.email;
+        prev.active     = ('active' in u) ? u.active : prev.active;
+        prev.groups = [...new Set([...(prev.groups||[]), ...(u.groups||[])])];
+        prev.flags  = [...new Set([...(prev.flags ||[]), ...(u.flags ||[])])];
+      } else { map.set(k, u); }
+    });
+    USERS = [...map.values()];
+    persist(); render();
+  };
+  r.readAsText(file);
+});
+
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  const csv = toCSV(USERS);
+  download('users-export.csv', csv);
+});
+
+document.getElementById('btnChangeTargets').addEventListener('click', async ()=>{
+  if (!supportsFS){
+    alert('Your browser does not support in-place overwrite. Use Chrome/Edge desktop for true save, or continue with normal downloads.');
+    return;
+  }
+  await pickTargets();
+  alert('Save locations updated. Future "Save CSVs" will overwrite those files.');
+});
+
+document.getElementById('btnSaveAll').addEventListener('click', async ()=>{
+  persist();
+  const usersCsv = toCSV(USERS);
+  const groupsCsv = toUserGroupsCSV(USERS);
+
+  if (supportsFS){
+    try {
+      if (!usersHandle || !groupsHandle){
+        await pickTargets();
+      }
+      await writeFile(usersHandle, usersCsv);
+      await writeFile(groupsHandle, groupsCsv);
+    } catch (err){
+      console.error(err);
+      alert('Save failed or was cancelled.');
+    }
+  } else {
+    download('users.csv', usersCsv);
+    download('user_groups.csv', groupsCsv);
+  }
+});
+
+/* ---------- Filters ---------- */
+['q','active','groupFilter'].forEach(id=> document.getElementById(id).addEventListener('input', render));
+
+render();
+</script>
+</body>
+</html>
